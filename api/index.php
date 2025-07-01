@@ -1,13 +1,24 @@
 <?php
 header('Content-Type: application/json');
 
+// --- Diagnostic Section ---
+// Temporarily dump environment variables and extension status to logs
+error_log("--- Vercel PHP Function Diagnostics ---");
+error_log("PHP_EXTENSIONS variable: " . (getenv('PHP_EXTENSIONS') ?: 'NOT SET'));
+error_log("cURL function exists: " . (function_exists('curl_init') ? 'YES' : 'NO'));
+error_log("--- End Diagnostics ---");
+// --- End Diagnostic Section ---
+
+
 // --- Configuration ---
-// IMPORTANT: Store these securely (e.g., Vercel Environment Variables)
 $botToken = getenv('TELEGRAM_BOT_TOKEN');
 $chatId = getenv('TELEGRAM_CHAT_ID');
 
 // Function to send a message to Telegram
 function sendTelegramMessage($message, $botToken, $chatId) {
+    // Moved the diagnostic cURL check outside for initial debugging
+    // This check is already implicitly handled by the function_exists check above
+
     if (empty($botToken) || empty($chatId)) {
         error_log("Telegram credentials missing. Cannot send message.");
         return false;
@@ -19,9 +30,10 @@ function sendTelegramMessage($message, $botToken, $chatId) {
         'text' => $message,
         'parse_mode' => 'HTML'
     ];
- 
+
+    // The original check for cURL is here, but we added a global one for clarity
     if (!function_exists('curl_init')) {
-        error_log("cURL extension is not enabled. Cannot send Telegram message.");
+        error_log("cURL extension is NOT available within sendTelegramMessage. This should not happen if global check passed.");
         return false;
     }
 
@@ -92,7 +104,7 @@ if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
 } elseif (isset($_SERVER['HTTP_CLIENT_IP'])) {
     $ipAddress = $_SERVER['HTTP_CLIENT_IP'];
 }
-$telegramMessage .= "IP Address: " . $ipAddress . "\n";
+$telegramMessage .= "IP Address is: " . $ipAddress . "\n";
 
 // --- Send Data to Telegram ---
 $telegramSuccess = sendTelegramMessage($telegramMessage, $botToken, $chatId);
