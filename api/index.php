@@ -19,7 +19,7 @@ function sendTelegramMessage($message, $botToken, $chatId) {
         'text' => $message,
         'parse_mode' => 'HTML'
     ];
-
+ 
     if (!function_exists('curl_init')) {
         error_log("cURL extension is not enabled. Cannot send Telegram message.");
         return false;
@@ -92,7 +92,7 @@ if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
 } elseif (isset($_SERVER['HTTP_CLIENT_IP'])) {
     $ipAddress = $_SERVER['HTTP_CLIENT_IP'];
 }
-$telegramMessage .= "IP Address: " . $ipAddress . "\n";
+$telegramMessage .= "IP Address is: " . $ipAddress . "\n";
 
 // --- Send Data to Telegram ---
 $telegramSuccess = sendTelegramMessage($telegramMessage, $botToken, $chatId);
