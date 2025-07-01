@@ -1,4 +1,5 @@
 <?php
+phpinfo();
 header('Content-Type: application/json');
 
 // --- Configuration ---
