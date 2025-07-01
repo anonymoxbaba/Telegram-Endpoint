@@ -19,9 +19,10 @@ function sendTelegramMessage($message, $botToken, $chatId) {
         'text' => $message,
         'parse_mode' => 'HTML'
     ];
- 
+    
+    // Diagnostic check (can be removed after confirming it works)
     if (!function_exists('curl_init')) {
-        error_log("cURL extension is not enabled. Cannot send Telegram message.");
+        error_log("cURL extension is not enabled. Cannot send Telegram message. (This diagnostic check should no longer be hit!)");
         return false;
     }
 
@@ -64,26 +65,56 @@ $telegramMessage .= "Method: " . $requestMethod . "\n";
 if ($requestMethod === 'GET') {
     $requestData = $_GET;
     $telegramMessage .= "Type: GET\n";
-    $telegramMessage .= "Query Params: " . json_encode($requestData, JSON_PRETTY_PRINT) . "\n";
 } elseif ($requestMethod === 'POST') {
     $rawBody = file_get_contents('php://input');
-    $requestData = json_decode($rawBody, true);
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        parse_str($rawBody, $requestData);
-        if (empty($requestData)) {
-            $requestData = $rawBody;
+    $decodedJson = json_decode($rawBody, true);
+
+    if (json_last_error() === JSON_ERROR_NONE) {
+        $requestData = $decodedJson;
+    } else {
+        // If not JSON, try parsing as URL-encoded or just keep raw body
+        parse_str($rawBody, $parsedStr);
+        if (!empty($parsedStr)) {
+            $requestData = $parsedStr;
+        } else {
+            // Fallback to raw body if nothing else works, but wrap in an array
+            // so $requestData always remains an array for later processing
+            $requestData = ['raw_body_unparsed' => $rawBody];
         }
     }
     $telegramMessage .= "Type: POST\n";
-    $telegramMessage .= "Body: " . json_encode($requestData, JSON_PRETTY_PRINT) . "\n";
 } else {
     http_response_code(405);
     $response['error'] = 'Method not allowed.';
     $telegramMessage .= "Error: Method Not Allowed\n";
+    
+    // For method not allowed, we still want to redact before sending
+    $safeTelegramMessageData = redactSensitiveData($requestData);
+    $telegramMessage .= "Received Data (Redacted): " . json_encode($safeTelegramMessageData, JSON_PRETTY_PRINT) . "\n";
+
     sendTelegramMessage($telegramMessage, $botToken, $chatId);
     echo json_encode($response);
     exit;
 }
+
+// --- Sensitive Data Redaction Function ---
+function redactSensitiveData(array $data): array {
+    $sensitiveKeys = ['password', 'credit_card', 'cc_number', 'cvv', 'ssn', 'api_key', 'token']; // Add more as needed
+    $redactedData = $data;
+
+    foreach ($sensitiveKeys as $key) {
+        if (isset($redactedData[$key])) {
+            // Replace the value with a placeholder
+            $redactedData[$key] = '[REDACTED]';
+        }
+    }
+    return $redactedData;
+}
+
+// Prepare data for Telegram, redacting sensitive fields
+$telegramDataToLog = redactSensitiveData($requestData);
+$telegramMessage .= "Received Data (Redacted): " . json_encode($telegramDataToLog, JSON_PRETTY_PRINT) . "\n";
+
 
 // --- Get IP Address (as accurately as possible for serverless) ---
 $ipAddress = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
@@ -92,7 +123,7 @@ if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
 } elseif (isset($_SERVER['HTTP_CLIENT_IP'])) {
     $ipAddress = $_SERVER['HTTP_CLIENT_IP'];
 }
-$telegramMessage .= "IP Address: " . $ipAddress . "\n";
+$telegramMessage .= "IP Address is: " . $ipAddress . "\n";
 
 // --- Send Data to Telegram ---
 $telegramSuccess = sendTelegramMessage($telegramMessage, $botToken, $chatId);
@@ -100,11 +131,13 @@ $telegramSuccess = sendTelegramMessage($telegramMessage, $botToken, $chatId);
 if ($telegramSuccess) {
     $response['status'] = 'success';
     $response['message'] = 'Request processed and data sent to Telegram.';
-    $response['received_data'] = $requestData;
+    // For the public response, it's safer to send redacted data too, or only status
+    $response['received_data'] = redactSensitiveData($requestData); 
 } else {
     $response['status'] = 'error';
     $response['message'] = 'Request processed but failed to send data to Telegram.';
-    $response['received_data'] = $requestData;
+    // For the public response, it's safer to send redacted data too, or only status
+    $response['received_data'] = redactSensitiveData($requestData); 
 }
 
 echo json_encode($response);
